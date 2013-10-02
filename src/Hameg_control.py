@@ -73,6 +73,23 @@ class Hameg_control(object):
                 print str(e)
             data = ''.join((data, resp))
         return data
+
+    def sendReceiveShort(self, cmd):
+        if self.socket == None:
+            self.connect()
+        try:
+            self.socket.send(cmd)
+        except socket.error, e:
+            print str(e)
+        
+        self.socket.settimeout(0.1)
+        try:
+            resp = self.socket.recv(2048)
+        except socket.error, e:
+            resp = ''
+            print str(e)
+        data = resp
+        return data
     
     def getWaveform(self, channel):
         cmd = ''.join(('CHAN', str(channel), ':DATA?\n'))
