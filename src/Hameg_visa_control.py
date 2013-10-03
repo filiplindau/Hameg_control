@@ -10,10 +10,11 @@ import time
 import visa
 
 class Hameg_control(object):
-    def __init__(self, ip, port):
+    def __init__(self, ip, port=5025):
         self.updateTime = 0.2
         self.updateTimeLong = 1.0
         
+        self.yrange = np.zeros(4)
         self.yinc = np.zeros(4)
         self.yoff = np.zeros(4)
         self.tinc = 0.0
@@ -25,7 +26,6 @@ class Hameg_control(object):
         self.visa = None
         
         self.connect()
-        print 'Connected'
         time.sleep(0.5)
         
         self.getErrorQueue()
@@ -51,7 +51,6 @@ class Hameg_control(object):
             err = self.getErrorQueue()
             raise ValueError(err[0])
         except Exception, e:            
-            print str(e)
             raise(e)
         return resp
     
@@ -91,7 +90,6 @@ class Hameg_control(object):
             cmd = ''.join(('ACQ:WRAT ', rate))
             self.sendCommand(cmd)
         else:
-            print 'Acquisition rate has to be AUTO, MWAV, or MSAM.'
             raise ValueError('Acquisition rate has to be AUTO, MWAV, or MSAM.')
 
     def getAcquisitionRate(self):
@@ -107,7 +105,6 @@ class Hameg_control(object):
         cmd = ''.join(('CHAN', str(channel), ':DATA?'))
         d_raw = self.sendReceive(cmd)
         d_int = np.fromstring(d_raw[2 + int(d_raw[1]):], dtype='u1') 
-        print d_int.shape
         data = d_int * self.yinc[channel] + self.yoff[channel]
         return data
                    
@@ -137,10 +134,11 @@ class Hameg_control(object):
             raise ValueError('Channel must be 1-4')
         cmd = ''.join(('CHAN', str(channel), ':DATA:YOR?'))
         data = self.sendReceive(cmd)
-        self.yoff[channel] = np.float(data)
+        self.yoff[channel - 1] = np.float(data)
         cmd = ''.join(('CHAN', str(channel), ':DATA:YINC?'))
         data = self.sendReceive(cmd)
-        self.yinc[channel] = np.float(data)
+        self.yinc[channel - 1] = np.float(data)
+        self.yrange[channel - 1] = self.yinc[channel - 1] * 256
         
     def setVerticalRange(self, channel, vRange):
         if channel < 1 and channel > 4:
@@ -150,6 +148,11 @@ class Hameg_control(object):
         time.sleep(self.updateTime)
         self.getVerticalData(channel)
         
+    def getVerticalRange(self, channel):
+        if channel < 1 and channel > 4:
+            raise ValueError('Channel must be 1-4')
+        return self.yrange[channel - 1]
+        
     def setVerticalOffset(self, channel, offset):
         if channel < 1 and channel > 4:
             raise ValueError('Channel must be 1-4')
@@ -157,6 +160,11 @@ class Hameg_control(object):
         self.sendCommand(cmd)
         time.sleep(self.updateTime)
         self.getVerticalData(channel)
+
+    def getVerticalOffset(self, channel):
+        if channel < 1 and channel > 4:
+            raise ValueError('Channel must be 1-4')
+        return self.yoff[channel - 1]
         
     def setBandwidth(self, channel, bw):
         if channel < 1 and channel > 4:
@@ -179,12 +187,10 @@ class Hameg_control(object):
     def setCoupling(self, channel, coupling):
         if channel < 1 and channel > 4:
             raise ValueError('Channel must be 1-4')
-        print 'Coupling: ', coupling
         if coupling.lower() in ['dc', 'dclimit', 'ac', 'aclimit', 'gnd']:
             cmd = ''.join(('CHAN', str(channel), ':COUP ', coupling))
             self.sendCommand(cmd)
         else:
-            print 'Coupling has to be DC, DCLimit, AC, ACLimit, or GND.'
             raise ValueError('Coupling has to be DC, DCLimit, AC, ACLimit, or GND.')
 
     def getCoupling(self, channel):
@@ -312,9 +318,7 @@ class Hameg_control(object):
         t0 = time.time()
         while resp != 'No error':
             data = self.sendReceive(cmd)
-#            resp = data.split(',')[1].split['"'][1]
             resp = data.split(',')[1].split('"')[1]
-            print data.split(',')[1].split('"')[1]
             errQueue.append(resp)
             dt = time.time() - t0
             if dt > 0.5:
