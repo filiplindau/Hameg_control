@@ -25,7 +25,7 @@ class Channel(object):
         self.coupling = 'dc'
         self.offset = 0.0
         self.range = 1.0
-        self.state = True
+        self.state = False
         self.data = np.zeros(6000)
 
 class OscilloscopeSetting(object):
@@ -219,8 +219,21 @@ class HamegDS(PyTango.Device_4Impl):
                 self.set_status(''.join(('Could not set trigger level: ', str(e))))
                 self.error_stream(''.join(('Could not set trigger level: ', str(e))))
                 continue
-    
-            self.checkCommands()
+
+            try:
+                for ind, channel in enumerate(self.oscilloscopeSetting.channels):
+                    self.info_stream(str(ind))
+                    self.oscilloscope.setChannelState(ind + 1, channel.state)
+#                    self.oscilloscope.setVerticalOffset(ind + 1, channel.offset)
+#                    self.oscilloscope.setVerticalRange(ind + 1, channel.range)
+                    self.commandQueue.put(OscilloscopeCommand('writeChannelState', (ind, True)))
+            except Exception, e:
+                exitInitFlag = False
+                self.error_stream(''.join(('Could not set channel: ', str(e))))
+                continue
+                
+            while self.commandQueue.empty() != True:
+                self.checkCommands()
             self.info_stream('Initialization finished.')
             self.set_state(PyTango.DevState.STANDBY)
 
@@ -258,6 +271,7 @@ class HamegDS(PyTango.Device_4Impl):
             self.set_status(''.join(('Could not set acquisition', str(e))))
             self.error_stream(''.join(('Could not set acquisition', str(e))))
         ch = 0
+        t0 = time.time()
         while self.stopStateThreadFlag == False:
             if self.get_state() != PyTango.DevState.ON:
                 break
@@ -270,25 +284,30 @@ class HamegDS(PyTango.Device_4Impl):
                 break
 
             try:
-                t = time.time()
+                
                 if self.oscilloscopeSetting.channels[ch].state == True:
                     self.oscilloscopeSetting.channels[ch].data = self.oscilloscope.getWaveform(ch + 1)
+                    t = time.time()
+#                    self.info_stream(''.join(('Channel ', str(ch), ': ', str(self.oscilloscopeSetting.channels[ch].data.shape),
+#                                              ' points, cycle time: ', str(t - t0), ' s')))
+                    t0 = t
                 ch += 1
                 if ch > 3:
                     ch = 0
-                time.sleep(0.05)
+
 
             except Exception, e:
                 # Immediately try again
-                self.error_stream(''.join(('Error read waveform ', str(ch))))
+                self.error_stream(''.join(('Error read waveform ', str(ch), ' : ', str(e))))
                 try:
                     if self.oscilloscopeSetting.channels[ch].state == True:
-                        self.oscilloscopeSetting.channels[ch].data = self.oscilloscope.getWaveform(ch)
+                        self.oscilloscopeSetting.channels[ch].data = self.oscilloscope.getWaveform(ch + 1)
                 except Exception, e:
                     self.set_state(PyTango.DevState.FAULT)
                     self.set_status('Error reading hardware.')
                     self.error_stream(''.join(('Error getWaveform: ', str(e))))
-
+            time.sleep(0.01)
+            
     def alarmHandler(self, prevState):
         pass
 
@@ -394,42 +413,50 @@ class HamegDS(PyTango.Device_4Impl):
                     self.set_state(PyTango.DevState.FAULT)
                     self.set_status(''.join(('Could not set trigger source: ', str(e))))
                     self.error_stream(''.join(('Could not set trigger source: ', str(e))))
-            elif cmd.command == 'writeChannel1State':
+            elif cmd.command == 'writeChannelState':
                 try:
-                    self.oscilloscope.setChannelState(1, cmd.data)
-                    self.oscilloscopeSetting.channels[0].state = self.oscilloscope.getChannelState(1)
-                    self.info_stream(''.join(('New channel1 state: ', str(self.oscilloscopeSetting.channels[0].state))))
+                    ch = cmd.data[0]
+                    data = cmd.data[1]
+                    self.oscilloscope.setChannelState(ch + 1, data)
+                    self.oscilloscopeSetting.channels[ch].state = self.oscilloscope.getChannelState(ch + 1)
+                    self.info_stream(''.join(('New channel ', str(ch + 1), ' state: ', str(self.oscilloscopeSetting.channels[ch].state))))
                 except Exception, e:
                     self.set_state(PyTango.DevState.FAULT)
-                    self.set_status(''.join(('Could not set channel1 state: ', str(e))))
-                    self.error_stream(''.join(('Could not set channel1 state: ', str(e))))
-            elif cmd.command == 'writeChannel1Coupling':
+                    self.set_status(''.join(('Could not set channel ', str(ch + 1), ' state: ', str(e))))
+                    self.error_stream(''.join(('Could not set channel ', str(ch + 1), ' state: ', str(e))))
+            elif cmd.command == 'writeChannelCoupling':
                 try:
-                    self.oscilloscope.setCoupling(1, cmd.data)
-                    self.oscilloscopeSetting.channels[0].coupling = self.oscilloscope.getCoupling(1)
-                    self.info_stream(''.join(('New channel1 coupling: ', str(self.oscilloscopeSetting.channels[0].couplinge))))
+                    ch = cmd.data[0]
+                    data = cmd.data[1]
+                    self.oscilloscope.setCoupling(ch + 1, data)
+                    self.oscilloscopeSetting.channels[ch].coupling = self.oscilloscope.getCoupling(ch + 1)
+                    self.info_stream(''.join(('New channel ', str(ch + 1), ' coupling: ', str(self.oscilloscopeSetting.channels[ch].coupling))))
                 except Exception, e:
                     self.set_state(PyTango.DevState.FAULT)
-                    self.set_status(''.join(('Could not set channel1 coupling: ', str(e))))
-                    self.error_stream(''.join(('Could not set channel1 coupling: ', str(e))))
-            elif cmd.command == 'writeChannel1Offset':
+                    self.set_status(''.join(('Could not set channel ', str(ch + 1), ' coupling: ', str(e))))
+                    self.error_stream(''.join(('Could not set channel ', str(ch + 1), ' coupling: ', str(e))))
+            elif cmd.command == 'writeChannelOffset':
                 try:
-                    self.oscilloscope.setVerticalOffset(1, cmd.data)
-                    self.oscilloscopeSetting.channels[0].offset = self.oscilloscope.getVerticalOffset(1)
-                    self.info_stream(''.join(('New channel1 offset: ', str(self.oscilloscopeSetting.channels[0].offset))))
+                    ch = cmd.data[0]
+                    data = cmd.data[1]
+                    self.oscilloscope.setVerticalOffset(ch + 1, data)
+                    self.oscilloscopeSetting.channels[ch].offset = self.oscilloscope.getVerticalOffset(ch + 1)
+                    self.info_stream(''.join(('New channel ', str(ch + 1), ' offset: ', str(self.oscilloscopeSetting.channels[ch].offset))))
                 except Exception, e:
                     self.set_state(PyTango.DevState.FAULT)
-                    self.set_status(''.join(('Could not set channel1 offset: ', str(e))))
-                    self.error_stream(''.join(('Could not set channel1 offset: ', str(e))))
-            elif cmd.command == 'writeChannel1Range':
+                    self.set_status(''.join(('Could not set channel ', str(ch + 1), ' offset: ', str(e))))
+                    self.error_stream(''.join(('Could not set channel ', str(ch + 1), ' offset: ', str(e))))
+            elif cmd.command == 'writeChannelRange':
                 try:
-                    self.oscilloscope.setVerticalRange(1, cmd.data)                    
-                    self.oscilloscopeSetting.channels[0].range = self.oscilloscope.getVerticalRange(1)
-                    self.info_stream(''.join(('New channel1 range: ', str(self.oscilloscopeSetting.channels[0].range))))
+                    ch = cmd.data[0]
+                    data = cmd.data[1]
+                    self.oscilloscope.setVerticalRange(ch + 1, data)                    
+                    self.oscilloscopeSetting.channels[ch].range = self.oscilloscope.getVerticalRange(ch + 1)
+                    self.info_stream(''.join(('New channel ', str(ch + 1), ' range: ', str(self.oscilloscopeSetting.channels[ch].range))))
                 except Exception, e:
                     self.set_state(PyTango.DevState.FAULT)
-                    self.set_status(''.join(('Could not set channel1 range: ', str(e))))
-                    self.error_stream(''.join(('Could not set channel1 range: ', str(e))))
+                    self.set_status(''.join(('Could not set channel ', str(ch + 1), ' range: ', str(e))))
+                    self.error_stream(''.join(('Could not set channel ', str(ch + 1), ' range: ', str(e))))
                     
             elif cmd.command == 'on':                
                 self.set_state(PyTango.DevState.ON)
@@ -645,6 +672,7 @@ class HamegDS(PyTango.Device_4Impl):
         self.info_stream(''.join(("In ", self.get_name(), "::read_Channel1Data()")))
         
         attr_read = self.oscilloscopeSetting.channels[0].data
+        self.info_stream(str(attr_read.shape))
         attr.set_value(attr_read, attr_read.shape[0])
         
 #---- Attribute State Machine -----------------
@@ -669,10 +697,10 @@ class HamegDS(PyTango.Device_4Impl):
 #     Write attribute
     def write_Channel1State(self, attr):
         self.info_stream(''.join(("In ", self.get_name(), "::write_Channel1State()")))
-        data = attr.get_write_value()
+        data = (0, attr.get_write_value())
         self.info_stream(''.join(("Attribute value = ", str(data))))
 
-        self.commandQueue.put(OscilloscopeCommand('writeChannel1State', data))
+        self.commandQueue.put(OscilloscopeCommand('writeChannelState', data))
         
 #---- Attribute State Machine -----------------
     def is_Channel1State_allowed(self, req_type):
@@ -696,10 +724,10 @@ class HamegDS(PyTango.Device_4Impl):
 #     Write attribute
     def write_Channel1Coupling(self, attr):
         self.info_stream(''.join(("In ", self.get_name(), "::write_Channel1Coupling()")))
-        data = attr.get_write_value()
+        data = (0, attr.get_write_value())
         self.info_stream(''.join(("Attribute value = ", str(data))))
 
-        self.commandQueue.put(OscilloscopeCommand('writeChannel1Coupling', data))
+        self.commandQueue.put(OscilloscopeCommand('writeChannelCoupling', data))
         
 #---- Attribute State Machine -----------------
     def is_Channel1Coupling_allowed(self, req_type):
@@ -723,10 +751,10 @@ class HamegDS(PyTango.Device_4Impl):
 #     Write attribute
     def write_Channel1Offset(self, attr):
         self.info_stream(''.join(("In ", self.get_name(), "::write_Channel1Offset()")))
-        data = attr.get_write_value()
+        data = (0, attr.get_write_value())
         self.info_stream(''.join(("Attribute value = ", str(data))))
 
-        self.commandQueue.put(OscilloscopeCommand('writeChannel1Offset', data))
+        self.commandQueue.put(OscilloscopeCommand('writeChannelOffset', data))
         
 #---- Attribute State Machine -----------------
     def is_Channel1Offset_allowed(self, req_type):
@@ -750,10 +778,10 @@ class HamegDS(PyTango.Device_4Impl):
 #     Write attribute
     def write_Channel1Range(self, attr):
         self.info_stream(''.join(("In ", self.get_name(), "::write_Channel1Range()")))
-        data = attr.get_write_value()
+        data = (0, attr.get_write_value())
         self.info_stream(''.join(("Attribute value = ", str(data))))
 
-        self.commandQueue.put(OscilloscopeCommand('writeChannel1Range', data))
+        self.commandQueue.put(OscilloscopeCommand('writeChannelRange', data))
         
 #---- Attribute State Machine -----------------
     def is_Channel1Range_allowed(self, req_type):
@@ -762,7 +790,393 @@ class HamegDS(PyTango.Device_4Impl):
                                 PyTango.DevState.INIT]:
             return False
         return True            
+
+
+#------------------------------------------------------------------
+#     Channel2Data attribute
+#------------------------------------------------------------------
+
+#     Read attribute
+    def read_Channel2Data(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::read_Channel2Data()")))
         
+        attr_read = self.oscilloscopeSetting.channels[1].data
+        self.info_stream(str(attr_read.shape))
+        attr.set_value(attr_read, attr_read.shape[0])
+        
+#---- Attribute State Machine -----------------
+    def is_Channel2Data_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.OFF,
+                                PyTango.DevState.UNKNOWN,
+                                PyTango.DevState.INIT]:
+            return False
+        return True
+    
+#------------------------------------------------------------------
+#     Channel2State attribute
+#------------------------------------------------------------------
+
+#     Read attribute
+    def read_Channel2State(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::read_Channel2State()")))
+        
+        attr_read = self.oscilloscopeSetting.channels[1].state
+        attr.set_value(attr_read)
+
+#     Write attribute
+    def write_Channel2State(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::write_Channel2State()")))
+        data = (1, attr.get_write_value())
+        self.info_stream(''.join(("Attribute value = ", str(data))))
+
+        self.commandQueue.put(OscilloscopeCommand('writeChannelState', data))
+        
+#---- Attribute State Machine -----------------
+    def is_Channel2State_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.OFF,
+                                PyTango.DevState.UNKNOWN,
+                                PyTango.DevState.INIT]:
+            return False
+        return True
+
+#------------------------------------------------------------------
+#     Channel2Coupling attribute
+#------------------------------------------------------------------
+
+#     Read attribute
+    def read_Channel2Coupling(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::read_Channel2Coupling()")))
+        
+        attr_read = self.oscilloscopeSetting.channels[1].coupling
+        attr.set_value(attr_read)
+
+#     Write attribute
+    def write_Channel2Coupling(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::write_Channel2Coupling()")))
+        data = (1, attr.get_write_value())
+        self.info_stream(''.join(("Attribute value = ", str(data))))
+
+        self.commandQueue.put(OscilloscopeCommand('writeChannelCoupling', data))
+        
+#---- Attribute State Machine -----------------
+    def is_Channel2Coupling_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.OFF,
+                                PyTango.DevState.UNKNOWN,
+                                PyTango.DevState.INIT]:
+            return False
+        return True
+
+#------------------------------------------------------------------
+#     Channel2Offset attribute
+#------------------------------------------------------------------
+
+#     Read attribute
+    def read_Channel2Offset(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::read_Channel2Offset()")))
+        
+        attr_read = self.oscilloscopeSetting.channels[1].offset
+        attr.set_value(attr_read)
+
+#     Write attribute
+    def write_Channel2Offset(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::write_Channel2Offset()")))
+        data = (1, attr.get_write_value())
+        self.info_stream(''.join(("Attribute value = ", str(data))))
+
+        self.commandQueue.put(OscilloscopeCommand('writeChannelOffset', data))
+        
+#---- Attribute State Machine -----------------
+    def is_Channel2Offset_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.OFF,
+                                PyTango.DevState.UNKNOWN,
+                                PyTango.DevState.INIT]:
+            return False
+        return True
+
+#------------------------------------------------------------------
+#     Channel2Range attribute
+#------------------------------------------------------------------
+
+#     Read attribute
+    def read_Channel2Range(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::read_Channel2Range()")))
+        
+        attr_read = self.oscilloscopeSetting.channels[1].range
+        attr.set_value(attr_read)
+
+#     Write attribute
+    def write_Channel2Range(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::write_Channel2Range()")))
+        data = (1, attr.get_write_value())
+        self.info_stream(''.join(("Attribute value = ", str(data))))
+
+        self.commandQueue.put(OscilloscopeCommand('writeChannelRange', data))
+        
+#---- Attribute State Machine -----------------
+    def is_Channel2Range_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.OFF,
+                                PyTango.DevState.UNKNOWN,
+                                PyTango.DevState.INIT]:
+            return False
+        return True            
+
+
+#------------------------------------------------------------------
+#     Channel3Data attribute
+#------------------------------------------------------------------
+
+#     Read attribute
+    def read_Channel3Data(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::read_Channel3Data()")))
+        
+        attr_read = self.oscilloscopeSetting.channels[2].data
+        self.info_stream(str(attr_read.shape))
+        attr.set_value(attr_read, attr_read.shape[0])
+        
+#---- Attribute State Machine -----------------
+    def is_Channel3Data_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.OFF,
+                                PyTango.DevState.UNKNOWN,
+                                PyTango.DevState.INIT]:
+            return False
+        return True
+    
+#------------------------------------------------------------------
+#     Channel3State attribute
+#------------------------------------------------------------------
+
+#     Read attribute
+    def read_Channel3State(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::read_Channel3State()")))
+        
+        attr_read = self.oscilloscopeSetting.channels[2].state
+        attr.set_value(attr_read)
+
+#     Write attribute
+    def write_Channel3State(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::write_Channel3State()")))
+        data = (2, attr.get_write_value())
+        self.info_stream(''.join(("Attribute value = ", str(data))))
+
+        self.commandQueue.put(OscilloscopeCommand('writeChannelState', data))
+        
+#---- Attribute State Machine -----------------
+    def is_Channel3State_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.OFF,
+                                PyTango.DevState.UNKNOWN,
+                                PyTango.DevState.INIT]:
+            return False
+        return True
+
+#------------------------------------------------------------------
+#     Channel3Coupling attribute
+#------------------------------------------------------------------
+
+#     Read attribute
+    def read_Channel3Coupling(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::read_Channel3Coupling()")))
+        
+        attr_read = self.oscilloscopeSetting.channels[2].coupling
+        attr.set_value(attr_read)
+
+#     Write attribute
+    def write_Channel3Coupling(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::write_Channel3Coupling()")))
+        data = (2, attr.get_write_value())
+        self.info_stream(''.join(("Attribute value = ", str(data))))
+
+        self.commandQueue.put(OscilloscopeCommand('writeChannelCoupling', data))
+        
+#---- Attribute State Machine -----------------
+    def is_Channel3Coupling_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.OFF,
+                                PyTango.DevState.UNKNOWN,
+                                PyTango.DevState.INIT]:
+            return False
+        return True
+
+#------------------------------------------------------------------
+#     Channel3Offset attribute
+#------------------------------------------------------------------
+
+#     Read attribute
+    def read_Channel3Offset(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::read_Channel3Offset()")))
+        
+        attr_read = self.oscilloscopeSetting.channels[2].offset
+        attr.set_value(attr_read)
+
+#     Write attribute
+    def write_Channel3Offset(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::write_Channel3Offset()")))
+        data = (2, attr.get_write_value())
+        self.info_stream(''.join(("Attribute value = ", str(data))))
+
+        self.commandQueue.put(OscilloscopeCommand('writeChannelOffset', data))
+        
+#---- Attribute State Machine -----------------
+    def is_Channel3Offset_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.OFF,
+                                PyTango.DevState.UNKNOWN,
+                                PyTango.DevState.INIT]:
+            return False
+        return True
+
+#------------------------------------------------------------------
+#     Channel3Range attribute
+#------------------------------------------------------------------
+
+#     Read attribute
+    def read_Channel3Range(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::read_Channel3Range()")))
+        
+        attr_read = self.oscilloscopeSetting.channels[2].range
+        attr.set_value(attr_read)
+
+#     Write attribute
+    def write_Channel3Range(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::write_Channel3Range()")))
+        data = (2, attr.get_write_value())
+        self.info_stream(''.join(("Attribute value = ", str(data))))
+
+        self.commandQueue.put(OscilloscopeCommand('writeChannelRange', data))
+        
+#---- Attribute State Machine -----------------
+    def is_Channel3Range_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.OFF,
+                                PyTango.DevState.UNKNOWN,
+                                PyTango.DevState.INIT]:
+            return False
+        return True            
+
+#------------------------------------------------------------------
+#     Channel4Data attribute
+#------------------------------------------------------------------
+
+#     Read attribute
+    def read_Channel4Data(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::read_Channel4Data()")))
+        
+        attr_read = self.oscilloscopeSetting.channels[3].data
+        self.info_stream(str(attr_read.shape))
+        attr.set_value(attr_read, attr_read.shape[0])
+        
+#---- Attribute State Machine -----------------
+    def is_Channel4Data_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.OFF,
+                                PyTango.DevState.UNKNOWN,
+                                PyTango.DevState.INIT]:
+            return False
+        return True
+    
+#------------------------------------------------------------------
+#     Channel4State attribute
+#------------------------------------------------------------------
+
+#     Read attribute
+    def read_Channel4State(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::read_Channel4State()")))
+        
+        attr_read = self.oscilloscopeSetting.channels[3].state
+        attr.set_value(attr_read)
+
+#     Write attribute
+    def write_Channel4State(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::write_Channel4State()")))
+        data = (3, attr.get_write_value())
+        self.info_stream(''.join(("Attribute value = ", str(data))))
+
+        self.commandQueue.put(OscilloscopeCommand('writeChannelState', data))
+        
+#---- Attribute State Machine -----------------
+    def is_Channel4State_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.OFF,
+                                PyTango.DevState.UNKNOWN,
+                                PyTango.DevState.INIT]:
+            return False
+        return True
+
+#------------------------------------------------------------------
+#     Channel4Coupling attribute
+#------------------------------------------------------------------
+
+#     Read attribute
+    def read_Channel4Coupling(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::read_Channel4Coupling()")))
+        
+        attr_read = self.oscilloscopeSetting.channels[3].coupling
+        attr.set_value(attr_read)
+
+#     Write attribute
+    def write_Channel4Coupling(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::write_Channel4Coupling()")))
+        data = (3, attr.get_write_value())
+        self.info_stream(''.join(("Attribute value = ", str(data))))
+
+        self.commandQueue.put(OscilloscopeCommand('writeChannelCoupling', data))
+        
+#---- Attribute State Machine -----------------
+    def is_Channel4Coupling_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.OFF,
+                                PyTango.DevState.UNKNOWN,
+                                PyTango.DevState.INIT]:
+            return False
+        return True
+
+#------------------------------------------------------------------
+#     Channel4Offset attribute
+#------------------------------------------------------------------
+
+#     Read attribute
+    def read_Channel4Offset(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::read_Channel4Offset()")))
+        
+        attr_read = self.oscilloscopeSetting.channels[3].offset
+        attr.set_value(attr_read)
+
+#     Write attribute
+    def write_Channel4Offset(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::write_Channel4Offset()")))
+        data = (3, attr.get_write_value())
+        self.info_stream(''.join(("Attribute value = ", str(data))))
+
+        self.commandQueue.put(OscilloscopeCommand('writeChannelOffset', data))
+        
+#---- Attribute State Machine -----------------
+    def is_Channel4Offset_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.OFF,
+                                PyTango.DevState.UNKNOWN,
+                                PyTango.DevState.INIT]:
+            return False
+        return True
+
+#------------------------------------------------------------------
+#     Channel4Range attribute
+#------------------------------------------------------------------
+
+#     Read attribute
+    def read_Channel4Range(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::read_Channel4Range()")))
+        
+        attr_read = self.oscilloscopeSetting.channels[3].range
+        attr.set_value(attr_read)
+
+#     Write attribute
+    def write_Channel4Range(self, attr):
+        self.info_stream(''.join(("In ", self.get_name(), "::write_Channel4Range()")))
+        data = (3, attr.get_write_value())
+        self.info_stream(''.join(("Attribute value = ", str(data))))
+
+        self.commandQueue.put(OscilloscopeCommand('writeChannelRange', data))
+        
+#---- Attribute State Machine -----------------
+    def is_Channel4Range_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.OFF,
+                                PyTango.DevState.UNKNOWN,
+                                PyTango.DevState.INIT]:
+            return False
+        return True            
+
 #==================================================================
 #
 #     HamegDS command methods
@@ -961,13 +1375,139 @@ class HamegDSClass(PyTango.DeviceClass):
                 'description':"Channel 1 trace.",
                 'unit': 'V'
             }],
+        'Channel2Range':
+            [[PyTango.DevDouble,
+            PyTango.SCALAR,
+            PyTango.READ_WRITE],
+            {
+                'description':"Channel voltage (total) range.",
+                'Memorized':"true_without_hard_applied",
+                'unit': 'V'
+            } ],
+        'Channel2Offset':
+            [[PyTango.DevDouble,
+            PyTango.SCALAR,
+            PyTango.READ_WRITE],
+            {
+                'description':"Channel voltage (total) offset.",
+                'Memorized':"true_without_hard_applied",
+                'unit': 'V'
+            } ],
+        'Channel2Coupling':
+            [[PyTango.DevString,
+            PyTango.SCALAR,
+            PyTango.READ_WRITE],
+            {
+                'description':"Channel analog input coupling. Valid entries: DC, DCLimit, AC, ACLimit, or GND",
+                'Memorized':"true_without_hard_applied",
+            } ],
+        'Channel2State':
+            [[PyTango.DevBoolean,
+            PyTango.SCALAR,
+            PyTango.READ_WRITE],
+            {
+                'description':"Channel enable state.",
+                'Memorized':"true_without_hard_applied",
+            } ],
+        'Channel2Data':
+            [[PyTango.DevDouble,
+            PyTango.SPECTRUM,
+            PyTango.READ, 6000],
+            {
+                'description':"Channel trace.",
+                'unit': 'V'
+            }],
+        'Channel3Range':
+            [[PyTango.DevDouble,
+            PyTango.SCALAR,
+            PyTango.READ_WRITE],
+            {
+                'description':"Channel voltage (total) range.",
+                'Memorized':"true_without_hard_applied",
+                'unit': 'V'
+            } ],
+        'Channel3Offset':
+            [[PyTango.DevDouble,
+            PyTango.SCALAR,
+            PyTango.READ_WRITE],
+            {
+                'description':"Channel voltage (total) offset.",
+                'Memorized':"true_without_hard_applied",
+                'unit': 'V'
+            } ],
+        'Channel3Coupling':
+            [[PyTango.DevString,
+            PyTango.SCALAR,
+            PyTango.READ_WRITE],
+            {
+                'description':"Channel analog input coupling. Valid entries: DC, DCLimit, AC, ACLimit, or GND",
+                'Memorized':"true_without_hard_applied",
+            } ],
+        'Channel3State':
+            [[PyTango.DevBoolean,
+            PyTango.SCALAR,
+            PyTango.READ_WRITE],
+            {
+                'description':"Channel enable state.",
+                'Memorized':"true_without_hard_applied",
+            } ],
+        'Channel3Data':
+            [[PyTango.DevDouble,
+            PyTango.SPECTRUM,
+            PyTango.READ, 6000],
+            {
+                'description':"Channel trace.",
+                'unit': 'V'
+            }],
+        'Channel4Range':
+            [[PyTango.DevDouble,
+            PyTango.SCALAR,
+            PyTango.READ_WRITE],
+            {
+                'description':"Channel voltage (total) range.",
+                'Memorized':"true_without_hard_applied",
+                'unit': 'V'
+            } ],
+        'Channel4Offset':
+            [[PyTango.DevDouble,
+            PyTango.SCALAR,
+            PyTango.READ_WRITE],
+            {
+                'description':"Channel voltage (total) offset.",
+                'Memorized':"true_without_hard_applied",
+                'unit': 'V'
+            } ],
+        'Channel4Coupling':
+            [[PyTango.DevString,
+            PyTango.SCALAR,
+            PyTango.READ_WRITE],
+            {
+                'description':"Channel analog input coupling. Valid entries: DC, DCLimit, AC, ACLimit, or GND",
+                'Memorized':"true_without_hard_applied",
+            } ],
+        'Channel4State':
+            [[PyTango.DevBoolean,
+            PyTango.SCALAR,
+            PyTango.READ_WRITE],
+            {
+                'description':"Channel enable state.",
+                'Memorized':"true_without_hard_applied",
+            } ],
+        'Channel4Data':
+            [[PyTango.DevDouble,
+            PyTango.SPECTRUM,
+            PyTango.READ, 6000],
+            {
+                'description':"Channel trace.",
+                'unit': 'V'
+            }],
         'TriggerSource':
             [[PyTango.DevString,
             PyTango.SCALAR,
             PyTango.READ_WRITE],
             {
                 'description':"Trigger source. Valid entries: ch1, ch2, ch3, ch4, ext, line",
-                'Memorized':"true",
+                'Memorized':"true_without_hard_applied",
             } ],
         'TriggerLevel':
             [[PyTango.DevDouble,

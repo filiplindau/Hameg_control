@@ -105,7 +105,7 @@ class Hameg_control(object):
         cmd = ''.join(('CHAN', str(channel), ':DATA?'))
         d_raw = self.sendReceive(cmd)
         d_int = np.fromstring(d_raw[2 + int(d_raw[1]):], dtype='u1') 
-        data = d_int * self.yinc[channel] + self.yoff[channel]
+        data = (d_int + 1) * self.yinc[channel - 1] + self.yoff[channel - 1] - self.yrange[channel - 1] / 2.0
         return data
                    
     def getDataHeader(self, channel):
@@ -132,14 +132,27 @@ class Hameg_control(object):
     def getVerticalData(self, channel):
         if channel < 1 and channel > 4:
             raise ValueError('Channel must be 1-4')
-        cmd = ''.join(('CHAN', str(channel), ':DATA:YOR?'))
+#        cmd = ''.join(('CHAN', str(channel), ':DATA:YOR?'))
+#        data = self.sendReceive(cmd)
+#        self.yoff[channel - 1] = np.float(data)
+#        cmd = ''.join(('CHAN', str(channel), ':DATA:YINC?'))
+#        data = self.sendReceive(cmd)        
+#        self.yinc[channel - 1] = np.float(data)
+#        self.yrange[channel - 1] = self.yinc[channel - 1] * 256
+#        print 'In getVerticalData: '
+#        print 'yrange = ', str(self.yrange[channel - 1])
+#        print 'yoff = ', str(self.yoff[channel - 1])
+#        print 'yinc = ', str(self.yinc[channel - 1])
+        
+        cmd = ''.join(('CHAN', str(channel), ':RANG?'))
+        data = self.sendReceive(cmd)
+        self.yrange[channel - 1] = np.float(data)
+        self.yinc[channel - 1] = np.float(data) / 256.0
+        cmd = ''.join(('CHAN', str(channel), ':OFFS?'))
         data = self.sendReceive(cmd)
         self.yoff[channel - 1] = np.float(data)
-        cmd = ''.join(('CHAN', str(channel), ':DATA:YINC?'))
-        data = self.sendReceive(cmd)
-        self.yinc[channel - 1] = np.float(data)
-        self.yrange[channel - 1] = self.yinc[channel - 1] * 256
         
+                
     def setVerticalRange(self, channel, vRange):
         if channel < 1 and channel > 4:
             raise ValueError('Channel must be 1-4')
@@ -157,6 +170,7 @@ class Hameg_control(object):
         if channel < 1 and channel > 4:
             raise ValueError('Channel must be 1-4')
         cmd = ''.join(('CHAN', str(channel), ':OFFS ', str(offset)))
+        print cmd
         self.sendCommand(cmd)
         time.sleep(self.updateTime)
         self.getVerticalData(channel)
@@ -222,7 +236,7 @@ class Hameg_control(object):
             raise ValueError('Channel must be 1-4')
         cmd = ''.join(('CHAN', str(channel), ':STAT?'))
         data = self.sendReceive(cmd)
-        return data
+        return bool(data)
 
 # Trigger
     def setTrigMode(self, mode):
@@ -338,10 +352,10 @@ class Hameg_control(object):
         cmd = '*RST'
         self.sendCommand(cmd)
         time.sleep(0.5)        
-        cmd = '*ESE 1'      # Enable OPC (operation complete bit in event status register
-        self.sendCommand(cmd)
+#        cmd = '*ESE 1'      # Enable OPC (operation complete bit in event status register
+#        self.sendCommand(cmd)
         self.setAcquisition('RUN')
-        self.fireSoftwareTrig()
+#        self.fireSoftwareTrig()
         for ch in range(4):
             print ch
             try:
@@ -365,7 +379,12 @@ class Hameg_control(object):
             cmd = 'STOP'
         self.sendCommand(cmd)
         
-        
+    def runAcq(self):
+        data = []
+        for k in range(10):
+            dt = self.getWaveform(1)
+            data.append(dt)
+        return data
 
 if __name__ == '__main__':
     hc = Hameg_control('130.235.94.72', 5025)
